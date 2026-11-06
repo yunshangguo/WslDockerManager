@@ -119,8 +119,28 @@ function waitForPort(host, port, timeoutMs = 30000) {
   });
 }
 
+// Free whatever process is currently bound to our HTTP port before we fork the
+// backend. A stale backend from an EARLIER build (or a previous run that was only
+// closed-to-tray) may still be holding the port and reading a DIFFERENT
+// data dir; if our fresh backend hit EADDRINUSE it would crash and the stale one
+// would keep serving — which is exactly what made a newly-set password fail with
+// 401. Killing the occupant lets our backend own the port and the canonical
+// data dir. Port 5050 is dedicated to this app, so this is safe.
+function freePort(port) {
+  try {
+    execFileSync('powershell.exe', [
+      '-NoProfile', '-NonInteractive', '-Command',
+      `$p = Get-NetTCPConnection -LocalPort ${port} -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess; if ($p) { $p | Sort-Object -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue } }`,
+    ], { timeout: 8000, windowsHide: true });
+    // give the OS a moment to release the socket
+    const t = Date.now();
+    while (Date.now() - t < 400) { /* busy-wait ~400ms */ }
+  } catch (_) { /* best-effort; bind will surface any remaining conflict */ }
+}
+
 function startBackend() {
   if (backend) return;
+  freePort(currentPort);
   const port = Number(readSettings().port) || 5050;
   currentPort = port;
   const env = { ...process.env, ELECTRON_RUN_AS_NODE: '1', WSLDM_PORT: String(port) };
@@ -277,7 +297,7 @@ function isAdmin() {
     const out = execFileSync('powershell.exe', [
       '-NoProfile', '-NonInteractive', '-Command',
       '[bool](([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator))',
-    ], { timeout: 8000, windowsHide: true });
+    ], { timeout: 3500, windowsHide: true });
     return /true/i.test(out.toString());
   } catch (_) { return null; }
 }
@@ -344,6 +364,7 @@ ipcMain.handle('save-settings', async (evt, data) => {
     if (firstRun) {
       firstRun = false;
       currentPort = p;
+      if (backend) await stopBackend(); // kill any stale backend still holding the port
       startBackend();
       await waitForPort('127.0.0.1', p, 30000);
       createMainWindow();
@@ -351,10 +372,19 @@ ipcMain.handle('save-settings', async (evt, data) => {
       return { ok: true, started: true };
     }
 
-    // 4) port changed later: restart backend and point the window at the new port
-    if (p !== oldPort) {
+    // 4) If the account/password changed (or the port changed), the running backend
+    //    MUST be restarted so it re-reads the freshly written users.json/settings
+    //    from the canonical WSLDM_DATA_DIR. Skipping this left a STALE backend
+    //    (often from an earlier build, or one started with a different data dir)
+    //    serving a different users.json, which made the new password fail with 401
+    //    "unauthorized" even though it was set correctly.
+    if (hash || p !== oldPort) {
+      currentPort = p;
       await restartBackend();
-      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.loadURL(`http://127.0.0.1:${p}/`);
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.loadURL(`http://127.0.0.1:${p}/`);
+      }
+      if (settingsWindow && !settingsWindow.isDestroyed()) settingsWindow.close();
       return { ok: true, restarted: true };
     }
 
@@ -372,13 +402,14 @@ if (!app.requestSingleInstanceLock()) {
   app.on('second-instance', () => { showMain(); });
 
   app.whenReady().then(async () => {
+    const t0 = Date.now();
     try { app.setAppUserModelId('com.wsldockermanager.app'); } catch (_) {}
 
     // 若当前不是管理员，自动提权重新拉起自身（让后端子进程继承管理员权限，
     // 后续“创建保活任务 / 一键安装”等操作均不再弹 UAC）。当前实例退出并释放
     // 单实例锁，提权后的新实例会重新获取锁并正常启动。
     const adm = isAdmin();
-    log('admin check: ' + adm);
+    log('admin check: ' + adm + ' (' + (Date.now() - t0) + 'ms)');
     if (adm === false) {
       log('非管理员，正在以管理员身份重新拉起…');
       relaunchElevated();
@@ -389,7 +420,7 @@ if (!app.requestSingleInstanceLock()) {
     const s = readSettings();
     currentPort = Number(s.port) || 5050;
     firstRun = !findAdmin(loadUsers());
-    log('app ready; firstRun=' + firstRun + ' port=' + currentPort + ' packaged=' + app.isPackaged);
+    log('app ready; firstRun=' + firstRun + ' port=' + currentPort + ' packaged=' + app.isPackaged + ' (' + (Date.now() - t0) + 'ms)');
 
     createTray();
 
@@ -397,8 +428,10 @@ if (!app.requestSingleInstanceLock()) {
       // No admin yet: let the user set port + account + password before booting.
       openSettings();
     } else {
+      const t1 = Date.now();
       startBackend();
       await waitForPort('127.0.0.1', currentPort, 30000);
+      log('backend ready after ' + (Date.now() - t1) + 'ms; creating main window');
       createMainWindow();
     }
   });
