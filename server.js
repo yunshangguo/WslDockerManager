@@ -22,7 +22,7 @@ if (require.main === module) {
 
 // Build marker - bump on every backend change so a status check can confirm the
 // NEW code is actually live (vs. an old server.js still bound to 5050).
-const BUILD = '2026-11-06f';
+const BUILD = '2026-11-06g';
 
 const containersRouter = require('./src/routes/containers');
 const imagesRouter = require('./src/routes/images');
@@ -245,7 +245,10 @@ const server = app.listen(cfg.port, async () => {
   }
   // 启动自检：异步缓存一份环境前置依赖报告（虚拟化/WSL/Debian/Docker/配置），
   // 供前端“环境检测”页与启动横幅使用（失败不影响主服务）。
-  prereqs.getPrereqs(true).catch((e) => log.warn('环境自检失败（非致命）: ' + (e && e.message)));
+  // 延后 4s 执行，避免它在应用刚启动、首屏渲染争抢 CPU/进程资源导致“启动慢”。
+  setTimeout(() => {
+    prereqs.getPrereqs(true).catch((e) => log.warn('环境自检失败（非致命）: ' + (e && e.message)));
+  }, 4000);
 });
 
 // Clean shutdown: release the keep-alive child so it does not linger as an

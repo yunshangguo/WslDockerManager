@@ -39,7 +39,9 @@ function userDataDir() {
   try { return app.getPath('userData'); } catch (_) { return ROOT; }
 }
 function dataDir() {
-  return app.isPackaged ? path.join(userDataDir(), 'data') : path.join(ROOT, 'data');
+  let d = readSettings().dataDir;
+  if (!d) d = defaultDataDir();
+  return path.isAbsolute(d) ? d : path.resolve(d);
 }
 function settingsFile() {
   return app.isPackaged ? path.join(userDataDir(), 'settings.json') : path.join(ROOT, 'electron-settings.json');
@@ -63,17 +65,26 @@ function log(...args) {
 
 // ---------------------------------------------------------------- settings files
 function readSettings() {
+  let s = null;
   try {
-    const s = JSON.parse(fs.readFileSync(settingsFile(), 'utf8'));
-    if (s && s.port) return { port: Number(s.port) || 5050 };
+    const raw = JSON.parse(fs.readFileSync(settingsFile(), 'utf8'));
+    if (raw && typeof raw === 'object') s = raw;
   } catch (e) { /* not created yet */ }
-  // Fall back to the bundled config.json port (dev convenience / first packaged run).
-  try {
-    const c = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.json'), 'utf8'));
-    return { port: Number(c.port) || 5050 };
-  } catch (e) {
-    return { port: 5050 };
+  if (!s || !s.port) {
+    // Fall back to the bundled config.json port (dev convenience / first packaged run).
+    try {
+      const c = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.json'), 'utf8'));
+      s = s || {};
+      if (!s.port) s.port = Number(c.port) || 5050;
+    } catch (e) {}
   }
+  s = s || {};
+  if (!s.port) s.port = 5050;
+  if (!s.dataDir) s.dataDir = defaultDataDir();
+  return s;
+}
+function defaultDataDir() {
+  return app.isPackaged ? path.join(userDataDir(), 'data') : path.join(ROOT, 'data');
 }
 function writeSettings(s) {
   const f = settingsFile();
@@ -138,13 +149,38 @@ function freePort(port) {
   } catch (_) { /* best-effort; bind will surface any remaining conflict */ }
 }
 
+// Recursively copy everything from oldDir into newDir (best-effort). Used when the
+// user changes the data directory so already-generated files follow to the new
+// location. Open/locked files (e.g. a live audit log) are skipped rather than
+// failing the whole migration.
+function migrateDataDir(oldDir, newDir) {
+  if (!oldDir || !newDir || oldDir === newDir) return 0;
+  if (!fs.existsSync(oldDir)) return 0;
+  let copied = 0;
+  const walk = (from, to) => {
+    fs.mkdirSync(to, { recursive: true });
+    for (const e of fs.readdirSync(from, { withFileTypes: true })) {
+      const src = path.join(from, e.name);
+      const dst = path.join(to, e.name);
+      try {
+        if (e.isDirectory()) walk(src, dst);
+        else { fs.copyFileSync(src, dst); copied++; }
+      } catch (err) {
+        log('migrate skip ' + src + ': ' + (err && err.message));
+      }
+    }
+  };
+  try { walk(oldDir, newDir); } catch (err) { log('migrate error: ' + (err && err.message)); }
+  return copied;
+}
+
 function startBackend() {
   if (backend) return;
   freePort(currentPort);
   const port = Number(readSettings().port) || 5050;
   currentPort = port;
-  const env = { ...process.env, ELECTRON_RUN_AS_NODE: '1', WSLDM_PORT: String(port) };
-  if (app.isPackaged) env.WSLDM_DATA_DIR = dataDir();
+  const env = { ...process.env, ELECTRON_RUN_AS_NODE: '1', WSLDM_PORT: String(port), WSLDM_DATA_DIR: dataDir() };
+  if (process.env.WSLDM_IS_ADMIN) env.WSLDM_IS_ADMIN = process.env.WSLDM_IS_ADMIN;
 
   const serverPath = path.join(ROOT, 'server.js');
   let child;
@@ -340,18 +376,39 @@ ipcMain.handle('get-settings', () => {
     username: admin ? admin.username : '',
     hasAdmin: !!admin,
     firstRun,
+    dataDir: dataDir(),
   };
+});
+
+ipcMain.handle('select-data-dir', () => {
+  try {
+    const r = dialog.showOpenDialogSync({
+      title: '选择文件保存目录',
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    return r && r[0] ? r[0] : null;
+  } catch (_) { return null; }
 });
 
 ipcMain.handle('app-quit', () => { quitApp(); return { ok: true }; });
 
 ipcMain.handle('save-settings', async (evt, data) => {
   try {
-    const { port, username, password } = data || {};
+    const { port, username, password, dataDir: dataDirInput } = data || {};
     const p = Number(port);
     if (!Number.isInteger(p) || p < 1 || p > 65535) {
       return { ok: false, error: '端口必须是 1–65535 之间的整数' };
     }
+
+    // resolve + validate the data directory (where project-generated files live)
+    let newDataDir = defaultDataDir();
+    if (dataDirInput && String(dataDirInput).trim()) {
+      const d = String(dataDirInput).trim();
+      newDataDir = path.isAbsolute(d) ? d : path.resolve(d);
+    }
+    try { fs.mkdirSync(newDataDir, { recursive: true }); }
+    catch (e) { return { ok: false, error: '文件保存地址无法创建：' + e.message }; }
+
     if (!username || !/^[a-zA-Z0-9_.-]+$/.test(username)) {
       return { ok: false, error: '账户名只能包含字母、数字、下划线、点、连字符' };
     }
@@ -360,9 +417,11 @@ ipcMain.handle('save-settings', async (evt, data) => {
     }
 
     const oldPort = Number(readSettings().port) || 5050;
+    const oldDataDir = dataDir();
+    const dataDirChanged = oldDataDir !== newDataDir;
 
-    // 1) port -> settings.json
-    writeSettings({ port: p });
+    // 1) port + data dir -> settings.json
+    writeSettings({ port: p, dataDir: newDataDir });
 
     // 2) admin account/password -> users.json
     const users = loadUsers();
@@ -378,7 +437,7 @@ ipcMain.handle('save-settings', async (evt, data) => {
     }
     fs.mkdirSync(path.dirname(usersFile()), { recursive: true });
     fs.writeFileSync(usersFile(), JSON.stringify(users, null, 2), 'utf8');
-    log('settings saved: port=' + p + ' user=' + username + (hash ? ' (password updated)' : ''));
+    log('settings saved: port=' + p + ' dataDir=' + newDataDir + ' user=' + username + (hash ? ' (password updated)' : ''));
 
     // 3) first run: start backend + open main window
     if (firstRun) {
@@ -392,20 +451,28 @@ ipcMain.handle('save-settings', async (evt, data) => {
       return { ok: true, started: true };
     }
 
-    // 4) If the account/password changed (or the port changed), the running backend
-    //    MUST be restarted so it re-reads the freshly written users.json/settings
-    //    from the canonical WSLDM_DATA_DIR. Skipping this left a STALE backend
-    //    (often from an earlier build, or one started with a different data dir)
-    //    serving a different users.json, which made the new password fail with 401
-    //    "unauthorized" even though it was set correctly.
-    if (hash || p !== oldPort) {
+    // 4) If the data dir / account / password / port changed, the running backend
+    //    MUST be restarted. For a data-dir change we additionally stop the backend
+    //    FIRST (so files aren't locked) and migrate the old files to the new folder
+    //    before starting it with the new WSLDM_DATA_DIR. Skipping this left a STALE
+    //    backend (often from an earlier build, or one started with a different data
+    //    dir) serving a different users.json, which made the new password fail with
+    //    401 "unauthorized" even though it was set correctly.
+    if (dataDirChanged || hash || p !== oldPort) {
       currentPort = p;
-      await restartBackend();
+      if (backend) await stopBackend();
+      let migrated = 0;
+      if (dataDirChanged) {
+        migrated = migrateDataDir(oldDataDir, newDataDir);
+        log('data dir changed: ' + oldDataDir + ' -> ' + newDataDir + ' (migrated ' + migrated + ' files)');
+      }
+      startBackend();
+      await waitForPort('127.0.0.1', p, 30000);
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.loadURL(`http://127.0.0.1:${p}/`);
       }
       if (settingsWindow && !settingsWindow.isDestroyed()) settingsWindow.close();
-      return { ok: true, restarted: true };
+      return { ok: true, restarted: true, migrated };
     }
 
     return { ok: true };
@@ -429,6 +496,10 @@ if (!app.requestSingleInstanceLock()) {
     // 后续“创建保活任务 / 一键安装”等操作均不再弹 UAC）。当前实例退出并释放
     // 单实例锁，提权后的新实例会重新获取锁并正常启动。
     const adm = isAdmin();
+    // Tell the forked backend we already know the admin state, so its own
+    // ensureElevated() skips spawning PowerShell again (saves ~0.5s at startup).
+    if (adm === true) process.env.WSLDM_IS_ADMIN = '1';
+    else if (adm === false) process.env.WSLDM_IS_ADMIN = '0';
     log('admin check: ' + adm + ' (' + (Date.now() - t0) + 'ms)');
     if (adm === false) {
       log('非管理员，正在以管理员身份重新拉起…');

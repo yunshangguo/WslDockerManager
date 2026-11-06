@@ -2,6 +2,8 @@
 // (window.electronAPI), validates the form, and shows the save result.
 (function () {
   const $ = (id) => document.getElementById(id);
+  const dirEl = $('dataDir');
+  const browseBtn = $('browseBtn');
   const portEl = $('port');
   const userEl = $('username');
   const pwEl = $('password');
@@ -24,6 +26,7 @@
       const s = await window.electronAPI.getSettings();
       firstRun = !!s.firstRun;
       hasAdmin = !!s.hasAdmin;
+      if (s.dataDir) dirEl.value = s.dataDir;
       if (s.port) portEl.value = s.port;
       if (s.username) userEl.value = s.username;
       if (firstRun) {
@@ -40,6 +43,7 @@
   }
 
   function validate() {
+    const dir = (dirEl.value || '').trim();
     const port = Number(portEl.value);
     if (!Number.isInteger(port) || port < 1 || port > 65535) {
       setStatus('端口必须是 1–65535 之间的整数', 'err');
@@ -66,7 +70,8 @@
       if (!password2) { setStatus('请再次输入「确认密码」以确认', 'err'); return null; }
       if (password !== password2) { setStatus('两次输入的密码不一致，请重新填写确认密码', 'err'); return null; }
     }
-    return { port, username, password: password || undefined };
+    // dataDir 为空表示“使用默认位置”，由主进程兜底；非空则原样传回
+    return { port, username, password: password || undefined, dataDir: dir || undefined };
   }
 
   async function save() {
@@ -84,7 +89,8 @@
       if (r.started) {
         setStatus('已保存，正在启动后端…', 'ok');   // main process closes this window
       } else if (r.restarted) {
-        setStatus('已保存，后端已按新端口重启，主界面即将刷新', 'ok');
+        const moved = (r.migrated && r.migrated > 0) ? ('，已迁移 ' + r.migrated + ' 个文件到新地址') : '';
+        setStatus('已保存，后端已重启，主界面即将刷新' + moved, 'ok');
         saveBtn.disabled = false;
         setTimeout(() => { try { window.close(); } catch (_) {} }, 900);
       } else {
@@ -97,7 +103,15 @@
     }
   }
 
+  async function browse() {
+    try {
+      const d = await window.electronAPI.selectDataDir();
+      if (d) dirEl.value = d;
+    } catch (_) {}
+  }
+
   saveBtn.addEventListener('click', save);
+  browseBtn.addEventListener('click', browse);
   closeBtn.addEventListener('click', () => { try { window.close(); } catch (_) {} });
   $('form').addEventListener('submit', (e) => { e.preventDefault(); save(); });
 

@@ -21,6 +21,11 @@ const { spawn, execFileSync } = require('child_process');
 
 function isAdmin() {
   if (process.platform !== 'win32') return true;
+  // When launched by the Electron shell, the parent already determined the admin
+  // state and passed it down via WSLDM_IS_ADMIN. Honor it to avoid spawning
+  // PowerShell a second time (startup latency) and to stay in sync with the shell.
+  if (process.env.WSLDM_IS_ADMIN === '1') return true;
+  if (process.env.WSLDM_IS_ADMIN === '0') return false;
   try {
     const out = execFileSync('powershell.exe', [
       '-NoProfile', '-NonInteractive', '-Command',

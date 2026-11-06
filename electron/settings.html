@@ -94,14 +94,23 @@
 <body>
   <div>
     <h1>设置</h1>
-    <p class="sub">修改应用开放端口，以及管理员账户与密码。</p>
+    <p class="sub">修改应用开放端口、文件保存地址，以及管理员账户与密码。</p>
   </div>
 
   <div id="banner" class="banner">
-    <b>首次设置：</b>请先设置端口和管理员账户密码，保存后即可进入主界面并用该账户登录。
+    <b>首次设置：</b>请先设置端口、文件保存地址和管理员账户密码，保存后即可进入主界面并用该账户登录。
   </div>
 
   <form id="form" class="card" autocomplete="off">
+    <div class="field">
+      <label for="dataDir">文件保存地址</label>
+      <div style="display:flex;gap:8px">
+        <input id="dataDir" type="text" placeholder="例如 D:\WslDockerManagerData" spellcheck="false" style="flex:1" />
+        <button id="browseBtn" type="button" style="height:36px;padding:0 14px;white-space:nowrap">浏览…</button>
+      </div>
+      <div class="hint">项目产生的数据（用户、配置、镜像更新记录等）保存位置。修改后原目录下的文件会自动迁移到新地址；留空则使用默认位置。</div>
+    </div>
+
     <div class="field">
       <label for="port">开放端口</label>
       <input id="port" type="number" min="1" max="65535" step="1" placeholder="5050" />
