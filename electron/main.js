@@ -206,7 +206,11 @@ function createMainWindow() {
     icon: fs.existsSync(ICON_PATH) ? ICON_PATH : undefined,
     show: false,
     backgroundColor: '#f3f5f9',
-    webPreferences: { contextIsolation: true, nodeIntegration: false },
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      preload: path.join(__dirname, 'app-preload.js'),
+    },
   });
   mainWindow.loadURL(`http://127.0.0.1:${currentPort}/`);
   mainWindow.once('ready-to-show', () => mainWindow.show());
@@ -229,7 +233,7 @@ function createMainWindow() {
       message: '要最小化到托盘后台运行，还是退出程序？',
       detail: '最小化到托盘：窗口隐藏，后端继续在后台运行（右键托盘图标可重新打开或改设置）。\n退出程序：停止后端并完全退出。',
     });
-    if (idx === 1) { isQuitting = true; app.quit(); }
+    if (idx === 1) { quitApp(); }
     else { mainWindow.hide(); }
   });
   mainWindow.on('closed', () => { mainWindow = null; });
@@ -268,7 +272,7 @@ function createTray() {
     { label: '打开主界面', click: showMain },
     { label: '设置（端口 / 账户 / 密码）', click: () => openSettings() },
     { type: 'separator' },
-    { label: '退出', click: () => { isQuitting = true; app.quit(); } },
+    { label: '退出', click: () => quitApp() },
   ]);
   tray.setContextMenu(menu);
   tray.on('double-click', showMain);
@@ -285,6 +289,20 @@ function showMain() {
     // still in first-run setup: bring the settings window forward instead
     openSettings();
   }
+}
+
+// Fully quit the app: destroy the tray, stop the backend, then app.quit() with an
+// app.exit() fallback. Destroying the tray explicitly prevents the Windows
+// notification-area icon from lingering after the process is gone, and the
+// fallback guarantees the process actually terminates even if app.quit() is
+// swallowed (it occasionally is when invoked synchronously from a window close
+// handler / tray click on Windows).
+function quitApp() {
+  isQuitting = true;
+  try { if (tray) { tray.destroy(); tray = null; } } catch (_) {}
+  if (backend) { try { backend.kill('SIGTERM'); } catch (_) {} }
+  setTimeout(() => { try { app.exit(0); } catch (_) {} }, 4000);
+  try { app.quit(); } catch (_) {}
 }
 
 // ---------------------------------------------------------------- self-elevation
@@ -324,6 +342,8 @@ ipcMain.handle('get-settings', () => {
     firstRun,
   };
 });
+
+ipcMain.handle('app-quit', () => { quitApp(); return { ok: true }; });
 
 ipcMain.handle('save-settings', async (evt, data) => {
   try {
@@ -443,6 +463,7 @@ if (!app.requestSingleInstanceLock()) {
 
   app.on('before-quit', () => {
     isQuitting = true;
+    try { if (tray) { tray.destroy(); tray = null; } } catch (_) {}
     if (backend) { try { backend.kill('SIGTERM'); } catch (_) {} }
   });
 }

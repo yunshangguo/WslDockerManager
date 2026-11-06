@@ -114,6 +114,15 @@ const App = {
       setToken(''); this.token = ''; this.user = null; location.hash = '';
       toast('已退出登录');
     },
+    quitApp() {
+      // Fully quit the desktop app (window + tray + backend). Only available inside
+      // the Electron shell; in a plain browser this action has no meaning.
+      if (window.electronAPI && typeof window.electronAPI.quitApp === 'function') {
+        window.electronAPI.quitApp();
+      } else {
+        toast('此操作仅在桌面客户端可用');
+      }
+    },
   },
   template: `
   <div v-if="!loggedIn" class="login-wrap">
@@ -139,6 +148,7 @@ const App = {
         <div>登录用户：<b>{{ (user&&user.username)||'admin' }}</b></div>
         <div v-if="user&&user.isAdmin" style="color:#2fa66b">管理员</div>
         <div style="margin-top:8px;cursor:pointer;color:#9aa3b5" @click="logout">退出登录</div>
+        <div style="margin-top:4px;cursor:pointer;color:#9aa3b5" @click="quitApp">退出程序</div>
       </div>
     </div>
     <div class="content">
