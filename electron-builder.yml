@@ -13,7 +13,10 @@ asar: false
 
 directories:
   output: dist
-  buildResources: electron
+  # Build resources dir must NOT be the app source dir (electron/). Pointing it at
+  # electron/ risks the packager treating the app entry (electron/main.js) as a
+  # build-only asset and excluding it from the package. Use a dedicated folder.
+  buildResources: build
 
 # Include the app, but never ship runtime data, logs, VCS metadata or the icon
 # generator. electron-builder automatically prunes devDependencies (electron,
