@@ -1,0 +1,19 @@
+{
+  "port": 5050,
+  "coordinatorPort": 5051,
+  "dockerHost": "127.0.0.1",
+  "dockerPort": 2375,
+  "distro": "Debian",
+  "dataDir": "data",
+  "autostartContainers": true,
+  "composeDir": "data/compose",
+  "composeBackupsDir": "data/compose/backups",
+  "secretsDir": "data/secrets",
+  "auditLog": "data/audit.log",
+  "logFile": "wsl-docker.log",
+  "supervisorLogFile": "wsl-docker-supervisor.log",
+  "session": {
+    "ttlHours": 12,
+    "secret": "CHANGE_ME_IN_PROD_or_set_SESSION_SECRET_env"
+  }
+}

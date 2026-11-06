@@ -1,0 +1,412 @@
+// WslDockerManager — Electron desktop shell.
+// - forks the existing Express backend (server.js) as an isolated child process
+//   using Electron's bundled Node runtime (ELECTRON_RUN_AS_NODE), so no separate
+//   node.exe is required in the packaged app
+// - opens a desktop window that loads the existing web UI from 127.0.0.1:<port>
+// - lives in the system tray; closing the window lets the user pick
+//   "minimize to tray" (backend keeps running) or "quit"
+// - a settings window lets the user change the port and the admin account/password
+//
+// Persistence:
+//   packaged  -> %APPDATA%/<app>/settings.json + %APPDATA%/<app>/data/*
+//   dev       -> ./electron-settings.json + ./data/*  (same as `npm start`)
+// The backend child receives WSLDM_PORT / WSLDM_DATA_DIR so src/config.js points
+// every mutable path at that location.
+const { app, BrowserWindow, Tray, Menu, dialog, ipcMain } = require('electron');
+const path = require('path');
+const fs = require('fs');
+const crypto = require('crypto');
+const http = require('http');
+const { fork, spawn, execFileSync } = require('child_process');
+
+const ROOT = path.join(__dirname, '..');
+const ICON_PATH = path.join(__dirname, 'icon.png');
+const SETTINGS_HTML = path.join(__dirname, 'settings.html');
+const SETTINGS_PRELOAD = path.join(__dirname, 'settings-preload.js');
+
+let mainWindow = null;
+let settingsWindow = null;
+let tray = null;
+let backend = null;
+let isQuitting = false;
+let restarting = false;
+let firstRun = false;
+let currentPort = 5050;
+
+// ---------------------------------------------------------------- paths / logs
+function userDataDir() {
+  try { return app.getPath('userData'); } catch (_) { return ROOT; }
+}
+function dataDir() {
+  return app.isPackaged ? path.join(userDataDir(), 'data') : path.join(ROOT, 'data');
+}
+function settingsFile() {
+  return app.isPackaged ? path.join(userDataDir(), 'settings.json') : path.join(ROOT, 'electron-settings.json');
+}
+function usersFile() {
+  return path.join(dataDir(), 'secrets', 'users.json');
+}
+function electronLogFile() {
+  return app.isPackaged ? path.join(userDataDir(), 'electron.log') : path.join(ROOT, 'wsl-docker-electron.log');
+}
+
+function log(...args) {
+  const line = `[${new Date().toISOString()}] ${args.join(' ')}\n`;
+  try {
+    const f = electronLogFile();
+    fs.mkdirSync(path.dirname(f), { recursive: true });
+    fs.appendFileSync(f, line);
+  } catch (_) {}
+  try { console.log(...args); } catch (_) {}
+}
+
+// ---------------------------------------------------------------- settings files
+function readSettings() {
+  try {
+    const s = JSON.parse(fs.readFileSync(settingsFile(), 'utf8'));
+    if (s && s.port) return { port: Number(s.port) || 5050 };
+  } catch (e) { /* not created yet */ }
+  // Fall back to the bundled config.json port (dev convenience / first packaged run).
+  try {
+    const c = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.json'), 'utf8'));
+    return { port: Number(c.port) || 5050 };
+  } catch (e) {
+    return { port: 5050 };
+  }
+}
+function writeSettings(s) {
+  const f = settingsFile();
+  fs.mkdirSync(path.dirname(f), { recursive: true });
+  fs.writeFileSync(f, JSON.stringify(s, null, 2), 'utf8');
+}
+function loadUsers() {
+  try {
+    const a = JSON.parse(fs.readFileSync(usersFile(), 'utf8'));
+    return Array.isArray(a) ? a : [];
+  } catch (e) { return []; }
+}
+function findAdmin(users) {
+  return users.find((u) => u && u.role === 'admin') || users.find((u) => u && u.username === 'admin') || null;
+}
+// Same scrypt scheme as src/auth.js (salt:hash hex), so the backend can verify it.
+function hashPassword(pw) {
+  const salt = crypto.randomBytes(16);
+  const hash = crypto.scryptSync(String(pw), salt, 64);
+  return salt.toString('hex') + ':' + hash.toString('hex');
+}
+
+// ---------------------------------------------------------------- backend child
+function waitForHealth(port, timeoutMs = 30000) {
+  const deadline = Date.now() + timeoutMs;
+  return new Promise((resolve) => {
+    const tryOnce = () => {
+      const req = http.get({ host: '127.0.0.1', port, path: '/api/health', timeout: 2000 }, (res) => {
+        res.resume();
+        if (res.statusCode && res.statusCode < 500) return resolve(true);
+        retry();
+      });
+      req.on('error', retry);
+      req.on('timeout', () => { req.destroy(); retry(); });
+      function retry() {
+        if (Date.now() > deadline) return resolve(false);
+        setTimeout(tryOnce, 500);
+      }
+    };
+    tryOnce();
+  });
+}
+
+function startBackend() {
+  if (backend) return;
+  const port = Number(readSettings().port) || 5050;
+  currentPort = port;
+  const env = { ...process.env, ELECTRON_RUN_AS_NODE: '1', WSLDM_PORT: String(port) };
+  if (app.isPackaged) env.WSLDM_DATA_DIR = dataDir();
+
+  const serverPath = path.join(ROOT, 'server.js');
+  let child;
+  try {
+    child = fork(serverPath, [], {
+      cwd: ROOT,
+      env,
+      // keep the ipc channel fork requires, but discard the child's stdio
+      stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+    });
+  } catch (e) {
+    log('failed to fork backend:', e.message);
+    return;
+  }
+  backend = child;
+  child.on('exit', (code, signal) => {
+    log('backend exited code=' + code + ' signal=' + signal);
+    // Only clear/restart if THIS child is still the tracked one. During a port
+    // change the old child may exit after a new one already started; it must not
+    // clobber the new reference.
+    if (backend === child) backend = null;
+    if (!isQuitting && !restarting && backend === null) {
+      setTimeout(() => { if (!isQuitting && !backend) startBackend(); }, 1500);
+    }
+  });
+  log('backend forked (port ' + port + ', data=' + (env.WSLDM_DATA_DIR || '<project>') + ')');
+}
+
+function stopBackend() {
+  if (!backend) return Promise.resolve();
+  const b = backend;
+  backend = null;
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => { if (done) return; done = true; resolve(); };
+    b.once('exit', finish);
+    try { b.kill('SIGTERM'); } catch (_) {}
+    setTimeout(() => { try { b.kill('SIGKILL'); } catch (_) {} finish(); }, 3000);
+  });
+}
+
+async function restartBackend() {
+  restarting = true;
+  await stopBackend();
+  restarting = false;
+  startBackend();
+  return waitForHealth(currentPort, 30000);
+}
+
+// ---------------------------------------------------------------- windows
+function createMainWindow() {
+  if (mainWindow && !mainWindow.isDestroyed()) { mainWindow.show(); mainWindow.focus(); return; }
+  mainWindow = new BrowserWindow({
+    width: 1280,
+    height: 860,
+    minWidth: 980,
+    minHeight: 640,
+    title: 'WslDockerManager',
+    icon: fs.existsSync(ICON_PATH) ? ICON_PATH : undefined,
+    show: false,
+    backgroundColor: '#f3f5f9',
+    webPreferences: { contextIsolation: true, nodeIntegration: false },
+  });
+  mainWindow.loadURL(`http://127.0.0.1:${currentPort}/`);
+  mainWindow.once('ready-to-show', () => mainWindow.show());
+  mainWindow.webContents.on('did-fail-load', () => {
+    if (isQuitting) return;
+    setTimeout(() => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.loadURL(`http://127.0.0.1:${currentPort}/`);
+    }, 1200);
+  });
+  mainWindow.on('close', (e) => {
+    if (isQuitting) return;
+    e.preventDefault();
+    const idx = dialog.showMessageBoxSync(mainWindow, {
+      type: 'question',
+      buttons: ['最小化到托盘', '退出程序'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+      title: '关闭 WslDockerManager',
+      message: '要最小化到托盘后台运行，还是退出程序？',
+      detail: '最小化到托盘：窗口隐藏，后端继续在后台运行（右键托盘图标可重新打开或改设置）。\n退出程序：停止后端并完全退出。',
+    });
+    if (idx === 1) { isQuitting = true; app.quit(); }
+    else { mainWindow.hide(); }
+  });
+  mainWindow.on('closed', () => { mainWindow = null; });
+}
+
+function openSettings() {
+  if (settingsWindow && !settingsWindow.isDestroyed()) { settingsWindow.show(); settingsWindow.focus(); return; }
+  settingsWindow = new BrowserWindow({
+    width: 470,
+    height: 580,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    title: '设置',
+    icon: fs.existsSync(ICON_PATH) ? ICON_PATH : undefined,
+    parent: mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined,
+    modal: false,
+    show: false,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      preload: SETTINGS_PRELOAD,
+    },
+  });
+  settingsWindow.loadFile(SETTINGS_HTML);
+  settingsWindow.once('ready-to-show', () => settingsWindow.show());
+  settingsWindow.on('closed', () => { settingsWindow = null; });
+}
+
+function createTray() {
+  if (tray) return;
+  if (!fs.existsSync(ICON_PATH)) { log('tray icon missing at ' + ICON_PATH); return; }
+  tray = new Tray(ICON_PATH);
+  tray.setToolTip('WslDockerManager');
+  const menu = Menu.buildFromTemplate([
+    { label: '打开主界面', click: showMain },
+    { label: '设置（端口 / 账户 / 密码）', click: () => openSettings() },
+    { type: 'separator' },
+    { label: '退出', click: () => { isQuitting = true; app.quit(); } },
+  ]);
+  tray.setContextMenu(menu);
+  tray.on('double-click', showMain);
+}
+
+function showMain() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  } else if (!firstRun) {
+    createMainWindow();
+  } else {
+    // still in first-run setup: bring the settings window forward instead
+    openSettings();
+  }
+}
+
+// ---------------------------------------------------------------- self-elevation
+// 让整个应用（含 fork 出的后端子进程）继承管理员权限：注册计划任务 / 安装向导等
+// 需要管理员的操作将不再每次弹 UAC。若当前非管理员，则自动以“以管理员身份运行”
+// 重新拉起自身并退出当前实例（用户需在 UAC 弹窗点“是”）。若权限检测异常（返回 null）
+// 则降级为普通模式继续运行（届时单步操作仍会按需弹 UAC）。
+function isAdmin() {
+  try {
+    const out = execFileSync('powershell.exe', [
+      '-NoProfile', '-NonInteractive', '-Command',
+      '[bool](([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator))',
+    ], { timeout: 15000, windowsHide: true });
+    return /true/i.test(out.toString());
+  } catch (_) { return null; }
+}
+
+function relaunchElevated() {
+  const exe = process.execPath;
+  const args = process.argv.slice(1).map((a) => '"' + String(a).replace(/"/g, '\\"') + '"');
+  const argList = args.length ? (' -ArgumentList ' + args.join(',')) : '';
+  const ps = `Start-Process -FilePath "${exe}"${argList} -Verb RunAs`;
+  try {
+    const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { windowsHide: true, stdio: 'ignore' });
+    child.on('error', () => {});
+  } catch (_) {}
+}
+
+// ---------------------------------------------------------------- IPC (settings)
+ipcMain.handle('get-settings', () => {
+  const s = readSettings();
+  const admin = findAdmin(loadUsers());
+  return {
+    port: Number(s.port) || 5050,
+    username: admin ? admin.username : '',
+    hasAdmin: !!admin,
+    firstRun,
+  };
+});
+
+ipcMain.handle('save-settings', async (evt, data) => {
+  try {
+    const { port, username, password } = data || {};
+    const p = Number(port);
+    if (!Number.isInteger(p) || p < 1 || p > 65535) {
+      return { ok: false, error: '端口必须是 1–65535 之间的整数' };
+    }
+    if (!username || !/^[a-zA-Z0-9_.-]+$/.test(username)) {
+      return { ok: false, error: '账户名只能包含字母、数字、下划线、点、连字符' };
+    }
+    if (password != null && password !== '' && String(password).length < 4) {
+      return { ok: false, error: '密码至少 4 个字符' };
+    }
+
+    const oldPort = Number(readSettings().port) || 5050;
+
+    // 1) port -> settings.json
+    writeSettings({ port: p });
+
+    // 2) admin account/password -> users.json
+    const users = loadUsers();
+    let admin = findAdmin(users);
+    const hash = (password != null && password !== '') ? hashPassword(password) : null;
+    if (admin) {
+      admin.username = username;
+      admin.role = 'admin';
+      if (hash) admin.passwordHash = hash;
+    } else {
+      if (!hash) return { ok: false, error: '首次设置必须填写密码' };
+      users.push({ username, passwordHash: hash, role: 'admin' });
+    }
+    fs.mkdirSync(path.dirname(usersFile()), { recursive: true });
+    fs.writeFileSync(usersFile(), JSON.stringify(users, null, 2), 'utf8');
+    log('settings saved: port=' + p + ' user=' + username + (hash ? ' (password updated)' : ''));
+
+    // 3) first run: start backend + open main window
+    if (firstRun) {
+      firstRun = false;
+      currentPort = p;
+      startBackend();
+      await waitForHealth(p, 30000);
+      createMainWindow();
+      if (settingsWindow && !settingsWindow.isDestroyed()) settingsWindow.close();
+      return { ok: true, started: true };
+    }
+
+    // 4) port changed later: restart backend and point the window at the new port
+    if (p !== oldPort) {
+      await restartBackend();
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.loadURL(`http://127.0.0.1:${p}/`);
+      return { ok: true, restarted: true };
+    }
+
+    return { ok: true };
+  } catch (err) {
+    log('save-settings error: ' + (err && err.message));
+    return { ok: false, error: (err && err.message) || String(err) };
+  }
+});
+
+// ---------------------------------------------------------------- app lifecycle
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', () => { showMain(); });
+
+  app.whenReady().then(async () => {
+    try { app.setAppUserModelId('com.wsldockermanager.app'); } catch (_) {}
+
+    // 若当前不是管理员，自动提权重新拉起自身（让后端子进程继承管理员权限，
+    // 后续“创建保活任务 / 一键安装”等操作均不再弹 UAC）。当前实例退出并释放
+    // 单实例锁，提权后的新实例会重新获取锁并正常启动。
+    const adm = isAdmin();
+    log('admin check: ' + adm);
+    if (adm === false) {
+      log('非管理员，正在以管理员身份重新拉起…');
+      relaunchElevated();
+      app.quit();
+      return;
+    }
+
+    const s = readSettings();
+    currentPort = Number(s.port) || 5050;
+    firstRun = !findAdmin(loadUsers());
+    log('app ready; firstRun=' + firstRun + ' port=' + currentPort + ' packaged=' + app.isPackaged);
+
+    createTray();
+
+    if (firstRun) {
+      // No admin yet: let the user set port + account + password before booting.
+      openSettings();
+    } else {
+      startBackend();
+      await waitForHealth(currentPort, 30000);
+      createMainWindow();
+    }
+  });
+
+  // Keep running in the tray when all windows are closed (unless the user chose quit).
+  app.on('window-all-closed', () => { /* stay in tray */ });
+
+  app.on('activate', () => { if (!firstRun && BrowserWindow.getAllWindows().length === 0) createMainWindow(); });
+
+  app.on('before-quit', () => {
+    isQuitting = true;
+    if (backend) { try { backend.kill('SIGTERM'); } catch (_) {} }
+  });
+}

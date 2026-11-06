@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>设置</title>
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --card: #ffffff;
+      --border: #e4e8ef;
+      --text: #0f172a;
+      --muted: #64748b;
+      --primary: #2563eb;
+      --primary-d: #1d4ed8;
+      --ok: #047857;
+      --err: #b91c1c;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      font-family: -apple-system, "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      padding: 20px 22px;
+      font-size: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      user-select: none;
+    }
+    h1 { font-size: 18px; margin: 0; }
+    .sub { color: var(--muted); font-size: 12.5px; margin: 3px 0 0; line-height: 1.5; }
+    .banner {
+      display: none;
+      background: rgba(37, 99, 235, 0.08);
+      border: 1px solid rgba(37, 99, 235, 0.3);
+      color: #1e40af;
+      padding: 10px 12px;
+      border-radius: 10px;
+      font-size: 12.5px;
+      line-height: 1.55;
+    }
+    .banner.show { display: block; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px 16px 6px;
+      box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+    }
+    .field { margin-bottom: 14px; }
+    .field label { display: block; font-weight: 600; font-size: 13px; margin-bottom: 6px; }
+    .field .hint { color: var(--muted); font-size: 11.5px; margin-top: 5px; line-height: 1.45; }
+    input {
+      width: 100%;
+      height: 36px;
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      padding: 0 11px;
+      font-size: 13.5px;
+      color: var(--text);
+      background: #fff;
+      outline: none;
+      transition: border-color .15s, box-shadow .15s;
+    }
+    input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12); }
+    .status { min-height: 18px; font-size: 12.5px; line-height: 1.4; }
+    .status.ok { color: var(--ok); }
+    .status.err { color: var(--err); }
+    .footer { margin-top: auto; display: flex; justify-content: flex-end; gap: 10px; }
+    button {
+      height: 36px;
+      padding: 0 18px;
+      border-radius: 9px;
+      border: 1px solid var(--border);
+      background: #fff;
+      color: var(--text);
+      font-size: 13.5px;
+      cursor: pointer;
+      transition: background .15s, border-color .15s;
+    }
+    button:hover { background: #f8fafc; }
+    button.primary {
+      background: var(--primary);
+      border-color: var(--primary);
+      color: #fff;
+      font-weight: 600;
+    }
+    button.primary:hover { background: var(--primary-d); border-color: var(--primary-d); }
+    button:disabled { opacity: .6; cursor: default; }
+  </style>
+</head>
+<body>
+  <div>
+    <h1>设置</h1>
+    <p class="sub">修改应用开放端口，以及管理员账户与密码。</p>
+  </div>
+
+  <div id="banner" class="banner">
+    <b>首次设置：</b>请先设置端口和管理员账户密码，保存后即可进入主界面并用该账户登录。
+  </div>
+
+  <form id="form" class="card" autocomplete="off">
+    <div class="field">
+      <label for="port">开放端口</label>
+      <input id="port" type="number" min="1" max="65535" step="1" placeholder="5050" />
+      <div class="hint">主界面与后端 API 使用的本机端口，默认 5050。修改后会自动重启后端。</div>
+    </div>
+
+    <div class="field">
+      <label for="username">管理员账户</label>
+      <input id="username" type="text" placeholder="admin" spellcheck="false" />
+      <div class="hint">仅支持字母、数字、下划线、点、连字符。</div>
+    </div>
+
+    <div class="field">
+      <label for="password">新密码</label>
+      <input id="password" type="password" placeholder="留空则不修改" />
+      <div class="hint">至少 4 个字符。留空表示保留原密码；修改后下次登录需用新密码（已登录的窗口不受影响）。</div>
+    </div>
+
+    <div class="field">
+      <label for="password2">确认密码</label>
+      <input id="password2" type="password" placeholder="再次输入新密码" />
+    </div>
+
+    <div id="status" class="status"></div>
+  </form>
+
+  <div class="footer">
+    <button id="closeBtn" type="button">关闭</button>
+    <button id="saveBtn" class="primary" type="button">保存并应用</button>
+  </div>
+
+  <script src="settings.js"></script>
+</body>
+</html>

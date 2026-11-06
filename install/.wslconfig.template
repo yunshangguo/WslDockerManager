@@ -1,0 +1,20 @@
+# WslDockerManager - WSL2 内存治理模板（放到 %USERPROFILE%\.wslconfig）
+# 这是「去掉 Docker Desktop 后内存仍可能爆」的真正解药：给 WSL2 VM 设硬上限。
+# 直接复制下面 [wsl2] 段到 C:\Users\<你的用户名>\.wslconfig，然后 `wsl --shutdown` 生效。
+#
+# 取值建议：
+#   memory   = 主机物理内存的 1/4 ~ 1/2（例如 32GB 主机设 8~16GB；跑大模型可到 24GB）
+#   swap     = 视需要，0 表示禁用交换；不确定就给 memory 的一半
+#   processors = 分配给 WSL2 的逻辑核数（不要超过物理核数）
+#   localhostForwarding = true  ← 必须，Windows 才能用 localhost:2375 访问 WSL2 里的 dockerd
+#
+# 重要：.wslconfig 里没有任何「禁止自动休眠」的开关。WSL2 会在空闲一段时间后
+# 自动终止发行版，导致 dockerd 连不上（ECONNREFUSED 2375）并杀掉所有容器。
+# 防止休眠靠「常驻保活进程」而非配置项：安装脚本会创建 WslDockerKeepAlive 计划
+# 任务（持续持有 WSL 实例），后端本身也会在运行期起一个 wsl sleep infinity 子进程。
+
+[wsl2]
+memory=8GB
+swap=4GB
+localhostForwarding=true
+processors=4

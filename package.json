@@ -1,0 +1,24 @@
+{
+  "name": "wsldockermanager",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Manage Docker Engine running inside WSL2 (no Docker Desktop) from Windows — packaged as a desktop app",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "node server.js",
+    "supervisor": "node supervisor.js",
+    "electron": "electron .",
+    "dist": "electron-builder --win",
+    "dist:portable": "electron-builder --win portable",
+    "dist:nsis": "electron-builder --win nsis"
+  },
+  "dependencies": {
+    "dockerode": "^4.0.2",
+    "express": "^4.19.2",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  }
+}

@@ -1,0 +1,48 @@
+# electron-builder configuration for WslDockerManager
+# Build on a Windows runner (CI) or locally on Windows:
+#   npm install
+#   npm run dist:portable     # single .exe
+#   npm run dist:nsis         # installer
+appId: com.wsldockermanager.app
+productName: WslDockerManager
+copyright: Copyright © 2026 WslDockerManager
+
+# Keep the app unpacked (asar: false) so the backend can write runtime data
+# (users.json / sessions.json / logs / image-updates) next to the executable.
+asar: false
+
+directories:
+  output: dist
+  buildResources: electron
+
+# Include the app, but never ship runtime data, logs, VCS metadata or the icon
+# generator. electron-builder automatically prunes devDependencies (electron,
+# electron-builder), so only express/dockerode/ws end up in the package.
+files:
+  - "**/*"
+  - "!data/**"
+  - "!dist/**"
+  - "!release/**"
+  - "!.git/**"
+  - "!**/*.log"
+  - "!electron/gen-icon.js"
+
+win:
+  target:
+    - portable
+  icon: electron/icon.png
+  # Always run as Windows administrator so the whole app (and the backend child it
+  # forks) has host-admin rights by default - required for creating scheduled tasks,
+  # enabling WSL, and other system-level operations. A UAC prompt appears once at
+  # launch (standard Windows behavior); this is what "default to admin" means.
+  requestedExecutionLevel: requireAdministrator
+
+portable:
+  artifactName: WslDockerManager-Portable-${version}.exe
+
+nsis:
+  artifactName: WslDockerManager-Setup-${version}.exe
+  shortcutName: WslDockerManager
+  createDesktopShortcut: true
+
+publish: null

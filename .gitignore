@@ -1,0 +1,45 @@
+# dependencies
+node_modules/
+
+# electron-builder output
+dist/
+release/
+
+# runtime data & secrets (users.json contains password hashes, sessions.json tokens)
+data/
+
+# logs
+*.log
+*.err.log
+
+# local overrides / dev desktop settings
+config.local.json
+electron-settings.json
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# --- 本地垃圾 / 误建文件 ---
+*.bak
+.tmpchk/
+# 误建的 44 字节碎文件（右键菜单片段），非项目内容
+Run as administrator
+# 本地诊断 / 分析笔记（非项目文档）
+功能增强与优化排查.md
+功能缺失分析.md
+# 运行时诊断输出
+admin-status.txt
+*.err
+
+# 安装脚本的临时探测文件
+install/_*
+
+# 大体积 Windows 二进制（由 install/setup-prereqs.ps1 自动下载，不入库）
+bin/docker.exe
+bin/dockerd.exe
+
+# 本机一键推送辅助脚本（含个人仓库地址，私有）
+push-github.ps1
