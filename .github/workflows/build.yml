@@ -8,6 +8,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write   # needed to create/refresh GitHub Releases and delete the moving tag
+
 jobs:
   build:
     runs-on: windows-latest
@@ -25,29 +28,47 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      # 非 tag 推送 / PR：仅构建便携版并上传为 Artifact（无发布）
-      - name: Build portable (CI / PR)
+      # 非 tag 推送 / PR：仅构建便携版
+      - name: Build portable (non-tag)
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         run: npx electron-builder --win portable --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
-      - name: Upload artifact (non-release)
-        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: WslDockerManager-Windows
-          path: dist/*.exe
-          if-no-files-found: warn
-
-      # tag (v*) 推送：构建便携版 + NSIS 安装包，并自动创建 GitHub Release 附上 exe
+      # tag (v*) 推送：构建便携版 + NSIS 安装包
       - name: Build release artifacts (tag)
         if: ${{ startsWith(github.ref, 'refs/tags/') }}
         run: npx electron-builder --win portable nsis --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
-      - name: Create GitHub Release
+      # 每次推送到 main 都发布一个“持续构建”Release，保证随时有可下载的成品。
+      # 先删除旧的 continuous 发布与 tag，再重建，使其始终指向最新 main。
+      - name: Delete previous continuous release
+        if: ${{ github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/') }}
+        shell: bash
+        run: |
+          gh release delete continuous --yes || true
+          git push origin :refs/tags/continuous || true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish continuous release (main)
+        if: ${{ github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/') }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: continuous
+          prerelease: true
+          name: Continuous Build (main)
+          files: dist/*.exe
+          generate_release_notes: false
+          body: |
+            自动构建自最新 `main` 分支，仅供测试，非稳定版本。
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # tag (v*) 推送：自动创建正式 GitHub Release 并附上 exe
+      - name: Publish versioned release (tag)
         if: ${{ startsWith(github.ref, 'refs/tags/') }}
         uses: softprops/action-gh-release@v2
         with:
@@ -55,3 +76,12 @@ jobs:
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # PR 构建：仅上传构件（不发布 Release）
+      - name: Upload artifact (PR)
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: WslDockerManager-Windows
+          path: dist/*.exe
+          if-no-files-found: warn

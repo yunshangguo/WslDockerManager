@@ -18,6 +18,7 @@ const fs = require('fs');
 const crypto = require('crypto');
 const http = require('http');
 const { fork, spawn, execFileSync } = require('child_process');
+const net = require('net');
 
 const ROOT = path.join(__dirname, '..');
 const ICON_PATH = path.join(__dirname, 'icon.png');
@@ -96,20 +97,22 @@ function hashPassword(pw) {
 }
 
 // ---------------------------------------------------------------- backend child
-function waitForHealth(port, timeoutMs = 30000) {
+// Fast readiness probe: a raw TCP connect to the backend port. We deliberately
+// avoid the HTTP /api/health endpoint here because that endpoint runs
+// ensureDockerd() on its first hit, which can block for many seconds while WSL +
+// dockerd cold-start. A TCP connect returns the instant the server binds the
+// port, so the UI window appears immediately and docker readiness is handled
+// separately by the page itself.
+function waitForPort(host, port, timeoutMs = 30000) {
   const deadline = Date.now() + timeoutMs;
   return new Promise((resolve) => {
     const tryOnce = () => {
-      const req = http.get({ host: '127.0.0.1', port, path: '/api/health', timeout: 2000 }, (res) => {
-        res.resume();
-        if (res.statusCode && res.statusCode < 500) return resolve(true);
-        retry();
-      });
-      req.on('error', retry);
-      req.on('timeout', () => { req.destroy(); retry(); });
+      const sock = net.connect({ host, port }, () => { sock.destroy(); resolve(true); });
+      sock.on('error', retry);
+      sock.setTimeout(1500, () => { sock.destroy(); retry(); });
       function retry() {
         if (Date.now() > deadline) return resolve(false);
-        setTimeout(tryOnce, 500);
+        setTimeout(tryOnce, 400);
       }
     };
     tryOnce();
@@ -168,7 +171,7 @@ async function restartBackend() {
   await stopBackend();
   restarting = false;
   startBackend();
-  return waitForHealth(currentPort, 30000);
+  return waitForPort('127.0.0.1', currentPort, 30000);
 }
 
 // ---------------------------------------------------------------- windows
@@ -274,7 +277,7 @@ function isAdmin() {
     const out = execFileSync('powershell.exe', [
       '-NoProfile', '-NonInteractive', '-Command',
       '[bool](([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator))',
-    ], { timeout: 15000, windowsHide: true });
+    ], { timeout: 8000, windowsHide: true });
     return /true/i.test(out.toString());
   } catch (_) { return null; }
 }
@@ -342,7 +345,7 @@ ipcMain.handle('save-settings', async (evt, data) => {
       firstRun = false;
       currentPort = p;
       startBackend();
-      await waitForHealth(p, 30000);
+      await waitForPort('127.0.0.1', p, 30000);
       createMainWindow();
       if (settingsWindow && !settingsWindow.isDestroyed()) settingsWindow.close();
       return { ok: true, started: true };
@@ -395,7 +398,7 @@ if (!app.requestSingleInstanceLock()) {
       openSettings();
     } else {
       startBackend();
-      await waitForHealth(currentPort, 30000);
+      await waitForPort('127.0.0.1', currentPort, 30000);
       createMainWindow();
     }
   });

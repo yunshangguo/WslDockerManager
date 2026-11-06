@@ -29,6 +29,8 @@
       if (firstRun) {
         bannerEl.classList.add('show');
         pwEl.placeholder = '设置管理员密码（必填）';
+        // 首次运行默认账户名为 admin，避免用户留空后误以为是“密码”出错
+        if (!userEl.value) userEl.value = 'admin';
       } else if (hasAdmin) {
         userEl.placeholder = s.username || 'admin';
       }
@@ -44,19 +46,25 @@
       return null;
     }
     const username = (userEl.value || '').trim();
-    if (!username || !/^[a-zA-Z0-9_.-]+$/.test(username)) {
+    if (!username) {
+      setStatus('请填写管理员账户名（默认 admin 即可）', 'err');
+      return null;
+    }
+    if (!/^[a-zA-Z0-9_.-]+$/.test(username)) {
       setStatus('账户名只能包含字母、数字、下划线、点、连字符', 'err');
       return null;
     }
     const password = pwEl.value || '';
     const password2 = pw2El.value || '';
     if (firstRun && !password) {
-      setStatus('首次设置必须填写密码', 'err');
+      setStatus('首次设置必须填写密码（至少 4 个字符）', 'err');
       return null;
     }
     if (password) {
       if (password.length < 4) { setStatus('密码至少 4 个字符', 'err'); return null; }
-      if (password !== password2) { setStatus('两次输入的密码不一致', 'err'); return null; }
+      // 只要填了新密码，确认框就必须填且必须一致 —— 否则容易被误读为“密码格式错误”
+      if (!password2) { setStatus('请再次输入「确认密码」以确认', 'err'); return null; }
+      if (password !== password2) { setStatus('两次输入的密码不一致，请重新填写确认密码', 'err'); return null; }
     }
     return { port, username, password: password || undefined };
   }
