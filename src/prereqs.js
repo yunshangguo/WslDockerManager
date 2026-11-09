@@ -231,13 +231,24 @@ async function checkWslConfig() {
     const txt = fs.readFileSync(p, 'utf8');
     const hasMem = /^\s*memory\s*=/im.test(txt);
     const sysd = /^\s*systemd\s*=\s*true/im.test(txt);
-    const fwd = /^\s*localhostforwarding\s*=\s*true/im.test(txt);
+    // localhostForwarding 仅在 networkingMode=nat（默认）时需要。
+    // mirrored 模式下 WSL 复用 Windows 主机网络栈，该设置无效且 WSL 会告警，
+    // 故检测时跳过它（不应要求存在）。
+    const netMode = (txt.match(/^\s*networkingMode\s*=\s*(\w+)/im) || [])[1] || '';
+    const isMirrored = /mirrored/i.test(netMode);
     const issues = [];
     if (!hasMem) issues.push('memory 上限');
     if (!sysd) issues.push('systemd=true');
-    if (!fwd) issues.push('localhostForwarding=true');
-    if (issues.length === 0) { c.ok = true; c.status = 'ok'; c.detail = '已包含 memory / systemd=true / localhostForwarding=true'; }
-    else { c.status = 'misconfigured'; c.detail = '缺少：' + issues.join('、'); }
+    if (!isMirrored) {
+      const fwd = /^\s*localhostforwarding\s*=\s*true/im.test(txt);
+      if (!fwd) issues.push('localhostForwarding=true');
+    }
+    if (issues.length === 0) {
+      c.ok = true; c.status = 'ok';
+      c.detail = isMirrored
+        ? '已包含 memory / systemd=true（mirrored 模式无需 localhostForwarding）'
+        : '已包含 memory / systemd=true / localhostForwarding=true';
+    } else { c.status = 'misconfigured'; c.detail = '缺少：' + issues.join('、'); }
   } catch (e) { c.detail = '检测失败：' + e.message; }
   return c;
 }
