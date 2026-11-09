@@ -1,6 +1,6 @@
 {
   "name": "wsldockermanager",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Manage Docker Engine running inside WSL2 (no Docker Desktop) from Windows — packaged as a desktop app",
   "main": "electron/main.js",

@@ -22,7 +22,7 @@ if (require.main === module) {
 
 // Build marker - bump on every backend change so a status check can confirm the
 // NEW code is actually live (vs. an old server.js still bound to 5050).
-const BUILD = '2026-11-06g';
+const BUILD = '2026-11-09a';
 
 const containersRouter = require('./src/routes/containers');
 const imagesRouter = require('./src/routes/images');

@@ -22,7 +22,8 @@
 - **操作审计（Audit）**：关键操作（登录、容器 / 镜像 / 引擎变更等）写入 `audit.log` 并可在「审计」页查看。
 - **镜像站登录（Registry Login）**：在「设置 - 镜像站登录」中以 `docker login` 方式登录私有 / 加速镜像站（如 `docker.1panel.live`、`registry.cn` 等），凭据保存在 WSL 的 `~/.docker/config.json`，可一键退出。
 - **Docker 引擎更新（Engine Update）**：在「概览 - Docker 引擎管理」中一键通过 `apt` 升级 WSL 内 Docker 组件（docker-ce / docker.io、CLI、containerd、buildx、compose 插件），以管理员权限执行。
-- **桌面外壳（Electron）**：独立 `.exe` 应用，托盘常驻、关闭窗口询问「最小化到托盘 / 退出」、首跑引导设置端口与账户、设置可免重启热应用。
+- **桌面外壳（Electron）**：独立 `.exe` 应用，托盘常驻、关闭窗口询问「最小化到托盘 / 退出」、首跑引导设置端口与账户、设置可免重启热应用、侧边栏「退出程序」真正退出（托盘消失 + 进程结束）。
+- **可配置文件保存目录（数据迁移）**：在「设置」中可修改项目产生的文件（用户表 / 审计 / Compose 配置等）保存地址；修改后会**自动把原目录文件迁移到新文件夹**，且首次运行设置即支持设定该地址。数据目录默认 `%APPDATA%/WslDockerManager/data`，桌面版通过 `WSLDM_DATA_DIR` 环境变量传给后端。
 - **常驻保活（Always-On）**：通过两层机制确保 WSL2 发行版与 Docker 引擎在「安装后」始终保持活跃、不会被系统空闲自动休眠 —— ① 后端进程内置常驻保活子进程（`wsl ... sleep infinity`）在应用运行期间持续持有 WSL 实例；② 安装脚本创建 `WslDockerKeepAlive` 计划任务，在应用关闭 / 重启后依旧每分钟保活重试，Docker 随 systemd 自动拉起。
 - **环境检测与一键安装（Setup Wizard）**：项目启动后自动检测运行前置依赖 —— CPU 虚拟化（VT-x/AMD-V + 虚拟机平台功能）、WSL2、Debian 发行版、Docker 引擎（及是否最新版）、`.wslconfig` 配置、`DOCKER_HOST`、dockerd 2375 覆盖、保活计划任务等。任一项缺失 / 过时 / 配置不当，均可在「环境检测」页查看明细与修复建议，并由项目**以管理员权限（UAC 提权）一键安装并自动配置**完整环境；环境未就绪时顶栏会弹出提示横幅。
 
@@ -213,7 +214,7 @@ npm run electron
 | Debian 发行版 | 是否已安装目标发行版（`wsl --install -d Debian`） |
 | Docker 引擎 | 是否安装且为最新版（`apt` 升级） |
 | WSL 内核/运行时 | 是否为最新（`wsl --update`） |
-| .wslconfig | 含 `memory` / `systemd=true` / `localhostForwarding=true` |
+| .wslconfig | 含 `memory` / `systemd=true`；`networkingMode=nat` 时还需 `localhostForwarding=true`（`mirrored` 模式下该设置无效且不应配置，检测会自动跳过） |
 | DOCKER_HOST | Windows 侧用户环境变量 `tcp://localhost:2375` |
 | dockerd 2375 覆盖 | systemd 覆盖文件含 `-H tcp://127.0.0.1:2375` |
 | 保活计划任务 | `WslDockerKeepAlive` 是否存在 |
@@ -322,6 +323,21 @@ A：更新经 `apt` 执行，需 WSL 内 `apt` 软件源可达（能 `apt-get up
 
 **Q：桌面版数据去哪了？**
 A：打包态落在 `%APPDATA%/WslDockerManager`；开发态与网页版一致，落在项目 `data/`。
+
+---
+
+## 版本历史
+
+### v0.2.0（2026-11-09）
+- **可配置文件保存目录 + 自动迁移**：「设置」中可修改数据目录，修改后自动把原目录文件迁移到新文件夹；首次运行设置即支持设定。
+- **启动加速**：桌面端改用 TCP 端口探测（不再阻塞于 dockerd 冷启动），父进程算一次管理员结果经 `WSLDM_IS_ADMIN` 传给后端避免重复 PowerShell 检测，启动自检延后执行；管理员直启约 3 秒。
+- **登录 401 修复**：改密码 / 账户后重启后端并强杀占用端口的旧进程，保证运行中的后端读取刚写入的 `users.json`。
+- **退出彻底**：侧边栏「退出程序」+ 托盘「退出」真正销毁托盘并结束进程（含 4 秒兜底强杀）。
+- **环境检测修正**：`networkingMode=mirrored` 下不再误报缺少 `localhostForwarding=true`（该设置在镜像模式下本就无效）。
+- **CI 升级**：`actions/checkout` / `actions/setup-node` 升到 `@v5`（Node 24 运行时，消除 Node 20 废弃告警）；每次推 `main` 自动发 `continuous` 预发布 Release，打 `v*` tag 发正式版。
+
+### v0.1.0
+- 初始版本：Express + dockerode 后端、Vue 3 无构建前端、容器 / 镜像 / 卷 / 网络 / Compose 管理、概览仪表盘、用户与权限、审计、镜像站登录、引擎更新、环境检测与一键安装、Electron 桌面外壳与常驻保活。
 
 ---
 

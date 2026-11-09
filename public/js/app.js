@@ -1,7 +1,7 @@
-import { api, getToken, setToken } from './api.js?v=20261106f';
-import { toast, fmtBytes, fmtPct } from './ui.js?v=20261106f';
-import { TaskDock, taskStore } from './tasks.js?v=20261106f';
-import { DashboardView, ContainersView, ImagesView, VolumesView, NetworksView, StacksView, TasksView, ContainerLogsView, UsersView, AuditView, InteractiveTerminalView, SettingsView, SetupView, stateBadge } from './views.js?v=20261106f';
+import { api, getToken, setToken } from './api.js?v=20261109a';
+import { toast, fmtBytes, fmtPct } from './ui.js?v=20261109a';
+import { TaskDock, taskStore } from './tasks.js?v=20261109a';
+import { DashboardView, ContainersView, ImagesView, VolumesView, NetworksView, StacksView, TasksView, ContainerLogsView, UsersView, AuditView, InteractiveTerminalView, SettingsView, SetupView, stateBadge } from './views.js?v=20261109a';
 
 const { createApp } = Vue; // Vue is loaded globally via CDN in index.html
 
