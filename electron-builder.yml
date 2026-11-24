@@ -18,6 +18,13 @@ directories:
   # build-only asset and excluding it from the package. Use a dedicated folder.
   buildResources: build
 
+# Runtime deps (express/dockerode/ws) are pure JS. The only native module in the
+# tree is cpu-features (via dockerode -> docker-modem -> ssh2), an OPTIONAL SSH
+# speedup we never use (this app connects to local WSL dockerd over TCP 2375, no SSH).
+# Rebuilding it needs a C++ toolchain and fails on machines without one, so skip
+# npm rebuild entirely. electron-builder still prunes devDeps and packs pure JS fine.
+npmRebuild: false
+
 # Include the app, but never ship runtime data, logs, VCS metadata or the icon
 # generator. electron-builder automatically prunes devDependencies (electron,
 # electron-builder), so only express/dockerode/ws end up in the package.
