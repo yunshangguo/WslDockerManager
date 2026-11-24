@@ -13,7 +13,7 @@
 # 进度以 `##STEP n/9 名称` 写入日志，供后端轮询；完成写 `##DONE`，需重启写 `##REBOOT`。
 [CmdletBinding()]
 param(
-  [string]$ProjectDir = 'D:\WslDockerManager',
+  [string]$ProjectDir = (Split-Path -Parent $PSScriptRoot),
   [string]$Distro = 'Debian',
   [string]$DistroLocation = 'D:\WSL\Debian',
   [string]$DockerVer = '27.5.1',

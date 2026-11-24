@@ -9,7 +9,7 @@
 #       而自启任务 WslDockerStart 只在“登录时”触发，睡眠/关机后不会重跑。
 #
 # 用法（管理员 PowerShell）：
-#   cd D:\WslDockerManager\install
+#   cd <项目目录>\install
 #   powershell -ExecutionPolicy Bypass -File .\fix-docker-2375.ps1
 # ---------------------------------------------------------------------------
 $ErrorActionPreference = 'Continue'

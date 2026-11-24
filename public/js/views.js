@@ -1881,7 +1881,8 @@ export const ImagesView = {
       // 存储：从 Config.Volumes 预填 hostPath:containerPath（host 端给一个默认可改路径）
       const vols = cfg.Volumes ? Object.keys(cfg.Volumes) : [];
       this.form.volumes = vols.length ? vols.map((cv) => ({
-        win: 'D:\\WslDockerManager\\data\\volumes\\' + this.safeName(img) + cv.replace(/\//g, '\\'),
+        // host 路径留空：由「浏览…」按钮选目录（后端 fs-list 会回退到系统根，通用各机器）
+        win: '',
         container: cv, mode: 'rw',
       })) : [{ win: '', container: '', mode: 'rw' }];
       // 元数据标签：从 Config.Labels 预填
@@ -1901,7 +1902,7 @@ export const ImagesView = {
     async openFolderPicker(index, mode) {
       this.fsTarget = index; this.fsMode = mode === 'file' ? 'file' : 'dir'; this.fsOpen = true; this.fsLoading = true;
       try {
-        const base = (this.form.volumes[index].win && this.form.volumes[index].win.trim()) || 'D:\\WslDockerManager\\data\\volumes';
+        const base = (this.form.volumes[index].win && this.form.volumes[index].win.trim()) || '';
         const r = await api.fsList(base);
         this.fsCurrent = r.path; this.fsItems = this.normEntries(r.entries);
       } catch (e) {

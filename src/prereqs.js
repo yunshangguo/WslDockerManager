@@ -331,7 +331,7 @@ Start-ScheduledTask -TaskName 'WslDockerKeepAlive' -ErrorAction SilentlyContinue
   await sleep(2000);
   const chk = await ps("(Get-ScheduledTask -TaskName 'WslDockerKeepAlive' -ErrorAction SilentlyContinue) ? 'yes' : 'no'");
   if (/yes/i.test(chk.stdout)) return { ok: true, message: '保活任务已创建并启动（已 UAC 提权）' };
-  return { ok: false, message: '创建失败：UAC 提权被取消或脚本未能启动。最快解法：右键 D:\\WslDockerManager\\CreateKeepAliveAsAdmin.bat → “以管理员身份运行”（UAC 点“是”）即可直接建任务，无需后端管理员权限。或右键 RunAsAdmin.bat 以管理员重启后端后重试。' };
+  return { ok: false, message: '创建失败：UAC 提权被取消或脚本未能启动。最快解法：右键项目根目录下的 CreateKeepAliveAsAdmin.bat → “以管理员身份运行”（UAC 点“是”）即可直接建任务，无需后端管理员权限。或右键 RunAsAdmin.bat 以管理员重启后端后重试。' };
 }
 
 const CHECKS = [

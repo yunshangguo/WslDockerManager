@@ -1,5 +1,5 @@
 @echo off
-cd /d D:\WslDockerManager
+cd /d "%~dp0"
 if not exist node_modules (
   echo node_modules missing, installing...
   call npm install

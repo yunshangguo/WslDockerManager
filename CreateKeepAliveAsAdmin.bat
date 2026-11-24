@@ -15,7 +15,7 @@ if %errorLevel% neq 0 (
 )
 
 echo Running as administrator - creating WslDockerKeepAlive scheduled task ...
-powershell -NoProfile -ExecutionPolicy Bypass -File "D:\WslDockerManager\install\create-keepalive.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install\create-keepalive.ps1"
 
 echo.
 echo Done. The WslDockerKeepAlive scheduled task should now exist.

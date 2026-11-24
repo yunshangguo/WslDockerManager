@@ -30,7 +30,7 @@ try {
 
 Write-Host ""
 if (-not $c) {
-  Write-Host "Backend is down -> run:  D:\WslDockerManager\restart-backend.bat"
+  Write-Host "Backend is down -> run:  restart-backend.bat in the project folder"
 } elseif ($b.dockerReachable -ne $true) {
   Write-Host "Backend is up but dockerd NOT reachable -> the backend should auto-recover; if it stays down, run restart-backend.bat or:"
   Write-Host "   wsl -d Debian -u root systemctl start docker"

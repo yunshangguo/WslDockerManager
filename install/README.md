@@ -21,7 +21,7 @@
 ## 二、执行步骤（在你本机，管理员 PowerShell）
 
 ```powershell
-cd D:\WslDockerManager\install
+cd <项目目录>\install
 .\setup-prereqs.ps1
 # 或兼容旧文档：.\setup-wsl-docker.ps1
 ```
@@ -33,7 +33,7 @@ cd D:\WslDockerManager\install
 4. 写 `%USERPROFILE%\.wslconfig`（内存上限；已备份原文件为 `.wslconfig.bak`）
 5. 在 WSL2 开启 systemd 并重启 WSL
 6. 在 WSL2 内安装 Docker Engine（运行 `setup-wsl-docker.sh`）
-7. 下载 Windows 侧 docker.exe 到 `D:\WslDockerManager\bin` 并加入 PATH
+7. 下载 Windows 侧 docker.exe 到 `<项目目录>\bin` 并加入 PATH
 8. 设 `DOCKER_HOST=tcp://localhost:2375` + 创建登录自启任务 `WslDockerStart` 与常驻保活任务 `WslDockerKeepAlive`
 9. 验证并收尾（`##DONE`；若过程中启用了 Windows 功能则额外写 `##REBOOT` 提示重启）
 
